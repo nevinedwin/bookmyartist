@@ -120,3 +120,50 @@ and signs out other devices (no confirmation email until Resend is set up). Admi
 SUPER_ADMIN. It is a soft delete: the row stays so notes, timeline and audit keep their author;
 the account is disabled, signed out, its email and phone released, and its open enquiries
 unassigned. Audit entries mask emails and phone numbers.
+
+### ADR-022 · Artist publishing and catalogue cache expiry (2026-11-23)
+An artist is on the website exactly when `status = ACTIVE`; staff-created artists start
+`INACTIVE` unless "Publish now" is ticked, so half-written profiles never go live. Saves call
+`updateTag` (read-your-own-writes) rather than `revalidateTag(…, "max")`: the editor expects to
+see the change on the website straight away, and admin edits are rare enough that the cost of a
+cold cache is negligible. Renaming a slug expires both tags; old links 404 (no redirects yet).
+The proxy's slug set (ADR-015) now lives on `globalThis`, because proxy.ts and Server Actions
+are separate bundles and a module variable could never be reset by a publish. A slug missing
+from the set is confirmed with one indexed lookup before answering 404, so a newly published
+artist is reachable at once on every instance; an unpublished one may still reach the page
+(which renders not-found) on other warm instances for up to 60 s.
+
+### ADR-023 · Client de-duplication by exact email or phone (2026-11-23)
+Duplicates are only flagged on an exact (normalised) email or E.164 phone match: fuzzy name
+matching produced too many false alarms for common Indian names. Creating a matching client
+returns the matches instead of an error, and staff can confirm "Create anyway" (shared office
+numbers, family members). Client records are never merged automatically, and linking an
+enquiry never rewrites its submitted contact snapshot.
+
+### ADR-024 · Task visibility and assignment (2026-11-23)
+Same rule as enquiries (ADR-018): anyone with `task:read` sees all tasks; "Mine" and
+"Unassigned" are filters. Assignees must be active staff holding `task:write`. Assigning someone
+else creates an in-app notification; tasks are cancelled rather than deleted so history stays.
+
+### ADR-025 · Deleting artists (2026-11-23)
+Archiving stays the normal way to retire an artist. A permanent delete exists for mistakes and
+needs the new `artist:delete` permission (Super admin and Admin; not Manager). It is refused while
+anything that must survive references the artist — enquiries (preferred or source), bookings,
+payouts, quotation lines, testimonials, files or a portal login — and the page lists what blocks
+it. The artist's own profile media, availability, blackouts and private details go with it. The
+user types the stage name to confirm; the deletion is audited with the slug and name. Existing
+databases need `npm run db:seed` once to grant the permission.
+
+### ADR-026 · Editing and deleting enquiries (2026-11-23)
+Refines the "snapshot" rule in ARCHITECTURE §3: staff with `enquiry:write` may correct an
+enquiry's contact, event, entertainment and budget fields, because a wrong phone number or a
+moved date must be fixable. The customer's free-text message is never editable. Edits are
+conditional on the version the editor loaded, and each save adds one timeline entry naming the
+changed fields, with old → new values for event details only (personal values aren't copied).
+Linking a client still never rewrites the enquiry.
+Permanent deletion needs the new `enquiry:delete` (Super admin, Admin) and a typed reference.
+It removes the enquiry with its notes, timeline, artist links, tentative holds, tasks and the
+notifications pointing at it, and is audited with the reference and a masked email. It is
+refused once a quotation, booking or file exists; those enquiries are closed as lost or
+cancelled instead. Existing databases need `npm run db:seed` once to grant the permission.
+

@@ -85,7 +85,7 @@ test.describe("admin access", () => {
 
 test.describe("enquiry management", () => {
   test("staff triage an enquiry: log a call, add a note, mark it lost", async ({ page }) => {
-    const name = `E2E Customer ${Date.now()}`;
+    const name = `E2E Customer ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = await insertEnquiry(name);
     await signIn(page, "e2e-staff@example.invalid");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("E2E");

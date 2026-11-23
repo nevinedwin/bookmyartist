@@ -4,6 +4,7 @@ import { fail, ok, type ApiResult } from "@/lib/api";
 import { businessToday } from "@/lib/time";
 import { publicEnquirySchema } from "@/lib/validation/enquiry";
 import { deliverPendingEmails } from "@/server/email/outbox";
+import { deliverPendingWhatsApp } from "@/server/whatsapp/outbox";
 import { env } from "@/server/env";
 import { hashIp } from "@/server/security/crypto";
 import { verifyFormToken } from "@/server/security/form-token";
@@ -101,12 +102,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Deliver confirmation emails after responding; failures are retried by cron.
+  // Deliver emails and WhatsApp alerts after responding; failures are retried by cron.
   after(async () => {
-    try {
-      await deliverPendingEmails(10);
-    } catch (error) {
-      console.error("[enquiries] email delivery pass failed", error instanceof Error ? error.message : error);
+    const results = await Promise.allSettled([deliverPendingEmails(10), deliverPendingWhatsApp(10)]);
+    for (const [i, r] of results.entries()) {
+      if (r.status === "rejected") {
+        console.error(`[enquiries] ${i === 0 ? "email" : "whatsapp"} delivery pass failed`, r.reason instanceof Error ? r.reason.message : r.reason);
+      }
     }
   });
 

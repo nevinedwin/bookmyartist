@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { EnquirySource, EnquiryStatus, LostReason, Priority } from "@/generated/prisma/enums";
+import { EnquirySource, EnquiryStatus, EventType, LostReason, Priority } from "@/generated/prisma/enums";
+import { emailSchema } from "./auth";
+import { optionalInt, optionalRupees, optionalText, requiredText } from "./common";
+import { phoneSchema } from "./users";
 
 const first = (v: unknown) => (Array.isArray(v) ? v[0] : v);
 const lenient = <T extends z.ZodType>(schema: T) => z.preprocess(first, schema.optional().catch(undefined));
@@ -53,3 +56,46 @@ export const logContactSchema = z.object({
 });
 
 export const togglePinSchema = z.object({ noteId: id, pinned: z.boolean() });
+
+/**
+ * Staff corrections to an enquiry. The customer's own message stays as sent.
+ * Unlike the public form, past event dates are allowed (fixing old records).
+ */
+export const updateEnquirySchema = z
+  .object({
+    enquiryId: id,
+    expectedUpdatedAt: z.iso.datetime(),
+    contactName: requiredText(2, 100, "Enter the customer's name."),
+    contactEmail: emailSchema,
+    contactPhone: z
+      .string()
+      .pipe(phoneSchema)
+      .refine((v): v is string => v !== null, "Enter a phone number."),
+    organization: optionalText(120),
+    eventType: z.enum(EventType),
+    eventDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose the event date.")
+      .refine((d) => !Number.isNaN(Date.parse(`${d}T00:00:00Z`)), "Choose a valid date."),
+    eventCity: requiredText(2, 80, "Enter the event city."),
+    venue: optionalText(160),
+    audienceSize: optionalInt(1, 200_000, "Enter a number between 1 and 2,00,000."),
+    categoryId: z.uuid().nullable().default(null),
+    performanceType: optionalText(120),
+    performersCount: optionalInt(1, 200, "Enter a number between 1 and 200."),
+    durationMinutes: optionalInt(10, 1440, "Enter minutes between 10 and 1,440."),
+    additionalRequirements: optionalText(2000),
+    budgetMin: optionalRupees(),
+    budgetMax: optionalRupees(),
+  })
+  .refine((v) => v.budgetMin === null || v.budgetMax === null || BigInt(v.budgetMin) <= BigInt(v.budgetMax), {
+    path: ["budgetMax"],
+    message: "Must be at least the minimum budget.",
+  });
+export type UpdateEnquiryInput = z.infer<typeof updateEnquirySchema>;
+
+export const deleteEnquirySchema = z.object({
+  enquiryId: id,
+  /** Typed by the user to confirm; must match the reference. */
+  confirmReference: z.string().trim().toUpperCase().max(40),
+});

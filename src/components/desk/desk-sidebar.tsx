@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CircleUser, ExternalLink, Inbox, LayoutDashboard, ShieldCheck } from "lucide-react";
+import { Bell, CircleUser, Contact, ExternalLink, Inbox, LayoutDashboard, ListTodo, MicVocal, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/shared/logo";
@@ -22,8 +22,12 @@ import type { AdminNavIcon } from "@/config/admin-nav";
 const ICONS: Record<AdminNavIcon, typeof Inbox> = {
   dashboard: LayoutDashboard,
   enquiries: Inbox,
+  tasks: ListTodo,
+  clients: Contact,
+  artists: MicVocal,
   notifications: Bell,
   users: ShieldCheck,
+  settings: Settings,
   account: CircleUser,
 };
 

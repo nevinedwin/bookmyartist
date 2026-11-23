@@ -1,11 +1,14 @@
 import type {
   ArtistStatus,
   BookingStatus,
+  ClientType,
+  CommissionType,
   EnquirySource,
   EnquiryStatus,
   EventType,
   LostReason,
   Priority,
+  TaskStatus,
 } from "@/generated/prisma/enums";
 
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
@@ -82,6 +85,28 @@ export const ARTIST_STATUS_LABELS: Record<ArtistStatus, string> = {
   INACTIVE: "Inactive",
   ON_HOLD: "On hold",
   ARCHIVED: "Archived",
+};
+
+export const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
+  INDIVIDUAL: "Individual",
+  CORPORATE: "Corporate",
+  COLLEGE: "College",
+  EVENT_PLANNER: "Event planner",
+  AGENCY: "Agency",
+  VENUE: "Venue",
+  OTHER: "Other",
+};
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  OPEN: "To do",
+  IN_PROGRESS: "In progress",
+  DONE: "Done",
+  CANCELLED: "Cancelled",
+};
+
+export const COMMISSION_TYPE_LABELS: Record<CommissionType, string> = {
+  PERCENTAGE: "Percentage of fee",
+  FIXED: "Fixed amount",
 };
 
 /** Budget ranges offered on the public enquiry form (rupees). `max: null` = open-ended. */

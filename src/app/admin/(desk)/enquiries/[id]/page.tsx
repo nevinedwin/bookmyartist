@@ -4,17 +4,26 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Suspense } from "react";
 import { EnquiryStatusBadge, PriorityLabel } from "@/components/desk/badges";
+import { EnquiryClientPanel } from "@/components/desk/clients/enquiry-client-panel";
 import { ContactLogForm, NoteForm, PinNoteButton } from "@/components/desk/enquiries/activity-forms";
+import { DeleteEnquiryDialog } from "@/components/desk/enquiries/delete-enquiry-dialog";
+import { EditEnquiryDialog } from "@/components/desk/enquiries/edit-enquiry-dialog";
 import { PipelinePanel } from "@/components/desk/enquiries/pipeline-panel";
 import { EmptyState } from "@/components/desk/empty-state";
 import { formatBudget } from "@/components/desk/format";
 import { NoAccess } from "@/components/desk/no-access";
+import { TaskDialog } from "@/components/desk/tasks/task-dialog";
+import { TaskList } from "@/components/desk/tasks/task-list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ENQUIRY_SOURCE_LABELS, ENQUIRY_STATUS_LABELS, EVENT_TYPE_LABELS, LOST_REASON_LABELS } from "@/lib/labels";
-import { formatCalendarDate, formatDateTime, utcToBusinessLocal } from "@/lib/time";
+import { paiseToRupeeInput } from "@/lib/money";
+import { formatCalendarDate, formatDateTime, utcToBusinessLocal, utcToCalendarDate } from "@/lib/time";
+import { can } from "@/server/auth/actor";
 import { actorWith } from "@/server/auth/dal";
 import { allowedEnquiryTransitions, isClosedEnquiry } from "@/server/domain/enquiry-status";
-import { getEnquiry, listAssignableUsers } from "@/server/services/admin/enquiries";
+import { getEnquiryClientSuggestions } from "@/server/services/admin/clients";
+import { getEnquiry, listAssignableUsers, listEnquiryCategories } from "@/server/services/admin/enquiries";
+import { listEnquiryTasks, listTaskAssignees } from "@/server/services/admin/tasks";
 
 export const metadata: Metadata = { title: "Enquiry" };
 
@@ -46,7 +55,17 @@ async function EnquiryDetailView({ params }: { params: PageProps<"/admin/enquiri
     );
   }
 
-  const users = enquiry.permissions.write ? await listAssignableUsers(actor) : [];
+  const canClients = can(actor, "client:read");
+  const canTasks = can(actor, "task:read");
+  const canWriteTasks = can(actor, "task:write");
+  const [users, suggestions, tasks, taskAssignees, categories] = await Promise.all([
+    enquiry.permissions.write ? listAssignableUsers(actor) : [],
+    canClients && enquiry.permissions.write && !enquiry.client ? getEnquiryClientSuggestions(actor, enquiry.id) : [],
+    canTasks ? listEnquiryTasks(actor, enquiry.id) : [],
+    canWriteTasks ? listTaskAssignees(actor) : [],
+    enquiry.permissions.write ? listEnquiryCategories(actor) : [],
+  ]);
+  const n = (v: number | null) => (v === null ? "" : String(v));
   const closed = isClosedEnquiry(enquiry.status);
   const transitions = closed && !enquiry.permissions.reopen ? [] : [...allowedEnquiryTransitions(enquiry.status)];
   const budget = formatBudget(enquiry.budgetMin, enquiry.budgetMax);
@@ -56,6 +75,40 @@ async function EnquiryDetailView({ params }: { params: PageProps<"/admin/enquiri
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="grid min-w-0 content-start gap-6">
         <header className="rounded-xl border bg-card p-5">
+          {enquiry.permissions.write || enquiry.permissions.delete ? (
+            <div className="float-right ml-3 flex flex-wrap gap-2">
+              {enquiry.permissions.write ? (
+                <EditEnquiryDialog
+                  key={enquiry.updatedAt.toISOString()}
+                  enquiryId={enquiry.id}
+                  updatedAt={enquiry.updatedAt.toISOString()}
+                  categories={categories}
+                  initial={{
+                    contactName: enquiry.contactName,
+                    contactEmail: enquiry.contactEmail,
+                    contactPhone: enquiry.contactPhone,
+                    organization: enquiry.organization ?? "",
+                    eventType: enquiry.eventType,
+                    eventDate: utcToCalendarDate(enquiry.eventDate),
+                    eventCity: enquiry.eventCity,
+                    venue: enquiry.venue ?? "",
+                    audienceSize: n(enquiry.audienceSize),
+                    categoryId: enquiry.categoryId ?? "",
+                    performanceType: enquiry.performanceType ?? "",
+                    performersCount: n(enquiry.performersCount),
+                    durationMinutes: n(enquiry.durationMinutes),
+                    additionalRequirements: enquiry.additionalRequirements ?? "",
+                    // A zero minimum means "no lower bound" (the public "Under ₹50K" range).
+                    budgetMin: enquiry.budgetMin === "0" ? "" : paiseToRupeeInput(enquiry.budgetMin),
+                    budgetMax: paiseToRupeeInput(enquiry.budgetMax),
+                  }}
+                />
+              ) : null}
+              {enquiry.permissions.delete ? (
+                <DeleteEnquiryDialog enquiryId={enquiry.id} reference={enquiry.reference} blockers={enquiry.deleteBlockers} impact={enquiry.deleteImpact} />
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <span className="font-mono">{enquiry.reference}</span>
             <span aria-hidden="true">·</span>
@@ -136,6 +189,22 @@ async function EnquiryDetailView({ params }: { params: PageProps<"/admin/enquiri
           {enquiry.message ? <Prose label="Message from the customer">{enquiry.message}</Prose> : null}
         </Section>
 
+        {canTasks ? (
+          <section className="rounded-xl border bg-card p-5" aria-label="Tasks">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-medium">Tasks</h2>
+              {canWriteTasks ? <TaskDialog assignees={taskAssignees} currentUserId={actor.userId} enquiryId={enquiry.id} trigger="small" /> : null}
+            </div>
+            <div className="mt-4">
+              {tasks.length ? (
+                <TaskList tasks={tasks} canWrite={canWriteTasks} assignees={taskAssignees} currentUserId={actor.userId} showEnquiry={false} />
+              ) : (
+                <p className="text-sm text-muted-foreground">No tasks for this enquiry.</p>
+              )}
+            </div>
+          </section>
+        ) : null}
+
         <Section title="Notes" description="Internal only.">
           {enquiry.permissions.write ? <NoteForm enquiryId={enquiry.id} /> : null}
           {enquiry.notes.length === 0 ? (
@@ -198,6 +267,18 @@ async function EnquiryDetailView({ params }: { params: PageProps<"/admin/enquiri
             />
           )}
         </div>
+        {canClients ? (
+          <div className="rounded-xl border bg-card p-5">
+            <h2 className="mb-3 font-medium">Client</h2>
+            <EnquiryClientPanel
+              enquiryId={enquiry.id}
+              client={enquiry.client}
+              suggestions={suggestions}
+              canLink={enquiry.permissions.write}
+              canCreate={enquiry.permissions.write && can(actor, "client:write")}
+            />
+          </div>
+        ) : null}
         {enquiry.permissions.write && !closed ? (
           <div className="rounded-xl border bg-card p-5">
             <ContactLogForm enquiryId={enquiry.id} isNew={enquiry.status === "NEW"} />

@@ -1,5 +1,5 @@
-import type { EnquiryStatus, Priority } from "@/generated/prisma/enums";
-import { ENQUIRY_STATUS_LABELS, PRIORITY_LABELS } from "@/lib/labels";
+import type { ArtistStatus, EnquiryStatus, Priority, TaskStatus } from "@/generated/prisma/enums";
+import { ARTIST_STATUS_LABELS, ENQUIRY_STATUS_LABELS, PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 /** Colour pairs always carry a text label too — colour is never the only signal. */
@@ -63,6 +63,41 @@ export function PriorityLabel({ priority }: { priority: Priority }) {
         ))}
       </span>
       {PRIORITY_LABELS[priority]}
+    </span>
+  );
+}
+
+const PILL = "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset";
+
+const ARTIST_STYLES: Record<ArtistStatus, { pill: string; dot: string }> = {
+  ACTIVE: { pill: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
+  INACTIVE: { pill: "bg-zinc-100 text-zinc-700 ring-zinc-200", dot: "bg-zinc-400" },
+  ON_HOLD: { pill: "bg-amber-50 text-amber-900 ring-amber-200", dot: "bg-amber-500" },
+  ARCHIVED: { pill: "bg-rose-50 text-rose-800 ring-rose-200", dot: "bg-rose-400" },
+};
+
+/** Says whether the profile is live, not just the raw status. */
+export function ArtistStatusBadge({ status, className }: { status: ArtistStatus; className?: string }) {
+  return (
+    <span className={cn(PILL, ARTIST_STYLES[status].pill, className)}>
+      <span className={cn("size-1.5 rounded-full", ARTIST_STYLES[status].dot)} aria-hidden="true" />
+      {status === "ACTIVE" ? "On website" : ARTIST_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+const TASK_STYLES: Record<TaskStatus, { pill: string; dot: string }> = {
+  OPEN: { pill: "bg-sky-50 text-sky-800 ring-sky-200", dot: "bg-sky-500" },
+  IN_PROGRESS: { pill: "bg-violet-50 text-violet-800 ring-violet-200", dot: "bg-violet-500" },
+  DONE: { pill: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
+  CANCELLED: { pill: "bg-zinc-100 text-zinc-700 ring-zinc-200", dot: "bg-zinc-400" },
+};
+
+export function TaskStatusBadge({ status, className }: { status: TaskStatus; className?: string }) {
+  return (
+    <span className={cn(PILL, TASK_STYLES[status].pill, className)}>
+      <span className={cn("size-1.5 rounded-full", TASK_STYLES[status].dot)} aria-hidden="true" />
+      {TASK_STATUS_LABELS[status]}
     </span>
   );
 }

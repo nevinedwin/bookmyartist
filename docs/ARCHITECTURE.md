@@ -1,6 +1,6 @@
 # BookMyArtist — Product & Technical Architecture
 
-> Status: Phases 1–3 complete (architecture; public website; auth, RBAC, admin shell and enquiry CRM).
+> Status: Phases 1–4 complete (architecture; public website; auth, RBAC, admin shell and enquiry CRM; artists, clients, tasks).
 > Living document — update it whenever an architectural decision changes.
 > Decisions and their rationale are recorded in [DECISIONS.md](./DECISIONS.md).
 
@@ -317,6 +317,8 @@ Permission keys are `<resource>:<verb>`. Roles are data (seeded), so new roles n
 | `enquiry:read` / `enquiry:write` | ✓ | ✓ | ✓ | ✓ | read |
 | `artist:read` / `artist:write` | ✓ | ✓ | ✓ | read | read |
 | `artist:internal` (rates, contacts) | ✓ | ✓ | ✓ | – | ✓ |
+| `artist:delete` (no-history artists only) | ✓ | ✓ | – | – | – |
+| `enquiry:delete` (no quotations, booking or files) | ✓ | ✓ | – | – | – |
 | `client:read` / `client:write` | ✓ | ✓ | ✓ | ✓ | read |
 | `booking:read` / `booking:write` | ✓ | ✓ | ✓ | ✓ | read |
 | `quotation:read` / `quotation:write` | ✓ | ✓ | ✓ | ✓ | read |
@@ -382,8 +384,8 @@ Permission keys are `<resource>:<verb>`. Roles are data (seeded), so new roles n
 | 1 | Architecture, schema, ER diagram, contracts, standards | ✅ Done |
 | 2 | Design system, public website (home, artists, profiles, categories, services, experiences, about, contact) and the working enquiry pipeline (wizard → validation → anti-bot → rate limit → DB → outbox → notifications). DB + Prisma brought forward from Phase 3 so the public site reads real data. | ✅ Done — see §9 |
 | 3 | Auth (sessions, Argon2id, RBAC), roles/permissions seed, initial admin bootstrap. Admin shell, dashboard and the enquiry CRM (table + board) brought forward from Phase 4. | ✅ Done — see §10 |
-| 4 | Artists CRUD (with catalogue cache invalidation), clients, tasks, more dashboard metrics | Next |
-| 5 | Bookings, calendar & conflicts, quotations (versions), invoices, payments, payouts, expenses, finance | |
+| 4 | Artists CRUD (with catalogue cache invalidation), clients, tasks, more dashboard metrics | ✅ Done — see §11 |
+| 5 | Bookings, calendar & conflicts, quotations (versions), invoices, payments, payouts, expenses, finance | Next |
 | 6 | Resend outbox delivery, Cloudinary uploads, PDFs, Razorpay (optional), Sentry | |
 | 7 | Integration + Playwright e2e suites, security review, performance & a11y passes | |
 | 8 | GitHub CI, Vercel + Neon environments, domain, production verification | |
@@ -433,4 +435,29 @@ See README "Current status" for the verified feature list; decisions in ADR-017 
 - **Known limits.** No password-reset email yet (admins reset). The board is a view: cards open
   the enquiry, where status changes are made with full validation (no drag-and-drop). Enquiries
   can't yet be created or edited by staff (Phase 4, with clients).
+
+## 11. Phase 4 notes
+
+See README "Current status" for the verified feature list; decisions in ADR-022 to ADR-024.
+
+- **Catalogue invalidation.** Artist services return the slugs they touched (old *and* new on a
+  rename). `src/server/actions/artists.ts` then calls `updateTag` for `artists`, `categories`,
+  `testimonials` and each `artist:<slug>`, and resets this instance's active-slug set used by
+  `proxy.ts`. Services can't call `updateTag` (Server Actions only), which keeps them testable.
+- **Confidential split.** `getArtistForAdmin` only adds `internal` to the Prisma `select` when the
+  actor holds `artist:internal`, so the data never leaves the database otherwise. Writing it needs
+  `artist:write` + `artist:internal`. Audit entries hold before/after money fields and the names of
+  changed text fields — never the notes, contacts or payout reference themselves.
+- **Concurrency.** Artist and client edits carry `expectedUpdatedAt`; the update is conditional on
+  it, so a stale tab gets a "reload" message instead of overwriting. Status changes (artists,
+  tasks) are conditional on the status the user saw, like enquiries.
+- **Forms.** Money is typed in rupees and converted to paise strings by shared Zod helpers
+  (`src/lib/validation/common.ts`); percentages become basis points. Neither passes through a JS
+  float. Image links must be https on a host `next/image` and the CSP allow.
+- **Tasks.** Status rules and IST due buckets are pure (`src/server/domain/task.ts`). "Overdue" is
+  before now; "today" runs to the end of the IST day; finished tasks are never overdue.
+- **Known limits.** No category, gallery/media or testimonial management yet; images are pasted
+  links until Cloudinary uploads (Phase 6). Task reminders are in-app notifications on assignment
+  only; due-date reminder emails come with the reminders cron (Phase 6). Staff can't create
+  enquiries by hand yet.
 

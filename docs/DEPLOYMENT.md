@@ -27,15 +27,19 @@ Production and non-production **never share a database**.
 ## 3. Vercel
 
 1. Import the GitHub repository. Framework preset: Next.js. Node 24.
-2. Build command: `npx prisma migrate deploy && next build`. Migrations run before the build,
-   because the build prerenders pages against the database.
+2. Build command: set in `vercel.json` (`prisma migrate deploy && next build`). Migrations run
+   before the build, because the build prerenders pages against the database.
    Install command: default (`npm install` runs `prisma generate` via `postinstall`).
 3. Set environment variables per environment (Production / Preview) from `.env.example`.
    Required: `DATABASE_URL`, `DIRECT_DATABASE_URL`, `APP_SECRET`, `NEXT_PUBLIC_SITE_URL`, `CRON_SECRET`.
    Recommended: `RESEND_API_KEY`, `EMAIL_FROM`, Turnstile keys, public contact details.
-4. Cron: `vercel.json` schedules `/api/cron/outbox` every 15 minutes (email retries and
-   rate-limit cleanup). Sub-daily crons need a Vercel Pro plan; on Hobby, change the schedule
-   to daily. Emails are also attempted immediately after each enquiry, so cron is only the retry path.
+4. Cron: `vercel.json` runs `/api/cron/outbox` once a day at 09:00 IST (03:30 UTC) — the most
+   the free Hobby plan allows. Emails and WhatsApp alerts are sent immediately after each enquiry,
+   so the cron only retries failures and cleans up. On Pro, change it to `*/15 * * * *`.
+   Free alternative for faster retries: an external pinger (e.g. cron-job.org) calling
+   `GET /api/cron/outbox` with `Authorization: Bearer <CRON_SECRET>` every 15 minutes.
+5. Plan: Vercel Hobby is free but limited to personal, non-commercial use under Vercel's terms.
+   It's fine for a trial or staging; a live agency site should move to Pro.
 
 ## 4. Database migrations
 
@@ -108,3 +112,34 @@ unlocks the account and signs it out everywhere (the role is kept unless `--role
 - [ ] First super admin created with `npm run admin:create`; team added via Team & access
 - [ ] `NEXT_PUBLIC_SITE_URL` is `https://…` (enables the `__Host-` Secure session cookie)
 - [ ] Backup and restore tested
+
+## 9. Email and WhatsApp alerts
+
+Recipients for new-enquiry alerts are managed in **Admin → Alert settings** (needs
+`settings:write`), which also shows whether each provider is connected, a **Send test alert**
+button, and the latest delivery results. Messages go through an outbox: they're saved with the
+enquiry, sent right after the response, and retried with backoff. Without provider keys they're
+recorded as `SKIPPED`, never shown as sent.
+
+**Email (Resend, free tier: 3,000 emails/month, 100/day)**
+1. Create a Resend account and add your domain; add the SPF/DKIM DNS records it shows.
+2. Set `RESEND_API_KEY` and `EMAIL_FROM` (e.g. `BookMyArtist <bookings@yourdomain.com>`).
+   Until the domain is verified, Resend only delivers to your own account address.
+
+**WhatsApp (Meta WhatsApp Cloud API)**
+1. In Meta for Developers create an app (type *Business*) and add the WhatsApp product. Meta
+   provides a test number that can message up to 5 verified recipients for free; for production,
+   add and verify your business phone number.
+2. In WhatsApp Manager → Message templates, create a **Utility** template named `new_enquiry`,
+   language English (`en`), with this body (six variables, in this order):
+   `New enquiry {{1}} from {{2}}: {{3}} on {{4}} in {{5}}. Open it: {{6}}`
+   Wait for approval (usually minutes).
+3. Create a System User in Business Settings, give it the app and the WhatsApp account, and
+   generate a permanent token with `whatsapp_business_messaging`. Set `WHATSAPP_ACCESS_TOKEN`
+   and `WHATSAPP_PHONE_NUMBER_ID` (the ID from API setup, not the phone number).
+4. Add the staff numbers in Alert settings and press **Send test alert**.
+
+Cost: Meta charges per business-initiated template message (Utility rates for India are small,
+but not zero); check Meta's current pricing. Only the reference, customer name, event type, date,
+city and the admin link are sent — never the customer's phone or email.
+

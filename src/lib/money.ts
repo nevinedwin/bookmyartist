@@ -129,3 +129,12 @@ export function formatBps(bps: number): string {
   const decimals = rest === 0 ? "" : "." + String(rest).padStart(2, "0").replace(/0$/, "");
   return `${whole}${decimals}%`;
 }
+
+/** Paise string → rupees for pre-filling an amount input ("15000050" → "150000.50", "" → ""). */
+export function paiseToRupeeInput(value: string | null | undefined): string {
+  if (!value) return "";
+  const paise = paiseFromString(value);
+  const whole = paise / PAISE_PER_RUPEE;
+  const fraction = paise % PAISE_PER_RUPEE;
+  return fraction === 0n ? whole.toString() : `${whole}.${(fraction < 0n ? -fraction : fraction).toString().padStart(2, "0")}`;
+}

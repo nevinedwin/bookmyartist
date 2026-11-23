@@ -1,8 +1,8 @@
 # BookMyArtist — Artist Booking & Entertainment Agency Platform
 
-A premium public website for discovering and enquiring about artists, plus (in
-progress) a private dashboard that runs the agency: enquiries, artists, clients,
-bookings, schedules, quotations, invoices, payments, payouts and reports.
+A premium public website for discovering and enquiring about artists, plus a private
+dashboard that runs the agency. Enquiries, artists, clients and tasks work today;
+bookings, schedules, quotations, invoices, payments, payouts and reports are still to come.
 
 > **Brand:** BookMyArtist. All brand strings come from `src/config/site.ts` and Business
 > Settings (ADR-017). Internal identifiers (`encore_local` / `encore_test` databases, Docker
@@ -15,10 +15,11 @@ bookings, schedules, quotations, invoices, payments, payouts and reports.
 | 1 | Architecture, schema, ER diagram, API contracts, standards | ✅ Done |
 | 2 | Design system + public website + working enquiry pipeline | ✅ Done |
 | 3 | Authentication, sessions, RBAC, admin bootstrap, admin shell, enquiry CRM | ✅ Done |
-| 4 | Artists CRUD, clients, tasks, dashboard additions | ⏭ Next |
-| 5–8 | Bookings & finance, integrations, hardening, deployment | Planned |
+| 4 | Artists CRUD, clients, tasks, dashboard additions | ✅ Done |
+| 5 | Bookings, calendar & conflicts, quotations, invoices, payments, payouts | ⏭ Next |
+| 6–8 | Integrations, hardening, deployment | Planned |
 
-**Working and verified (Phases 2–3)**
+**Working and verified (Phases 2–4)**
 
 - Public site (dark "Stage" design system): home (12 sections), artist directory with
   URL-driven search/filters and pagination, artist profiles, categories, services (8 pages),
@@ -48,15 +49,38 @@ bookings, schedules, quotations, invoices, payments, payouts and reports.
   refused), owner assignment (with notification), priority, follow-up scheduling in IST, logged
   calls/emails/WhatsApp/meetings (first contact moves NEW → CONTACTED), pinned internal notes,
   full timeline. All staff with `enquiry:read` see all enquiries (owner decision).
-- **Dashboard**: live counts (follow-ups due, new in 7 days, open, unassigned, mine, events in
-  30 days), pipeline by status, latest enquiries. No estimated or sample numbers.
+  "Edit details" corrects contact, event, entertainment and budget (stale saves refused; each
+  save is summarised on the timeline; the customer's message stays as sent). Super admins and
+  admins can permanently delete spam, test or duplicate enquiries (typed reference, audited);
+  enquiries with quotations, a booking or files can only be closed.
+- **Artists** (`/admin/artists`): roster with search and filters (status, category, featured,
+  archived). Add and edit the public profile (auto-generated, de-duplicated web address; image
+  links limited to Unsplash/Cloudinary; public price and contact only when switched on),
+  publish/unpublish through status, "availability checked" for the public badge. Super admins
+  and admins can permanently delete an artist that has no history (typed-name confirmation,
+  audited); anyone linked to enquiries, bookings or payments can only be archived. Saving expires
+  the public catalogue cache, so the website shows the change on the next request. Stale saves
+  are refused. Confidential rates, contacts, commission and payout reference need
+  `artist:internal` to see or change, and every change is audited (amounts only, never notes).
+- **Clients** (`/admin/clients`): search, type filter, archive/restore, edit with stale-save
+  protection. Creating a client whose email or phone already exists shows the matching records
+  first ("Create anyway" to confirm). On an enquiry: link a suggested match (same email or
+  phone), search and link, or create a client from the submitted details in one click, each
+  logged on the timeline; the customer's original submission is never rewritten.
+- **Tasks** (`/admin/tasks` and on each enquiry): assignee, priority, due time in IST, details;
+  overdue/today/7-day filters; complete, re-open or cancel with conflict protection; assignees
+  are notified. Everyone with `task:read` sees all tasks ("Mine" is a filter).
+- **Dashboard**: sections appear per permission — enquiry counts, pipeline and latest
+  enquiries; my overdue/today/open tasks and next tasks; artists on the website, hidden, and
+  with unchecked availability; clients, new clients and open enquiries without a client. All
+  live counts; no estimated or sample numbers.
 - Notifications inbox with unread badge and mark-read.
-- Tests: 96 Vitest tests (66 unit, 30 integration against a real Postgres) and 24 end-to-end
-  tests (Playwright, desktop and mobile).
+- Tests: 140 Vitest tests (unit + integration against a real Postgres) and Playwright
+  end-to-end tests (desktop and mobile).
 
-**Not built yet:** artists/clients/tasks management, bookings, calendar, quotations, invoices,
-payments, payouts, expenses, reports, settings UI, Cloudinary uploads, PDFs. The admin menu
-only lists modules that exist.
+**Not built yet:** bookings, calendar, quotations, invoices, payments, payouts, expenses,
+reports, settings UI, category and media/gallery management, Cloudinary uploads, PDFs, task
+reminder emails, staff-created enquiries, editing an enquiry's artist list. The admin menu only lists modules that exist.
 
 ## Tech stack
 

@@ -1120,6 +1120,8 @@ model BusinessSettings {
   currency               String   @default("INR")
   timezone               String   @default("Asia/Kolkata")
   enquiryNotifyEmails    String[]
+  /// E.164 numbers that get a WhatsApp alert for each new enquiry.
+  enquiryNotifyWhatsapp  String[] @default([])
   defaultSetupMinutes    Int      @default(60)
   defaultTravelMinutes   Int      @default(60)
   defaultTeardownMinutes Int      @default(30)
@@ -1132,6 +1134,29 @@ model BusinessSettings {
   paymentInstructions    String?
   updatedById            String?  @db.Uuid
   updatedAt              DateTime @updatedAt @db.Timestamptz(3)
+}
+
+/// Outbound WhatsApp (Cloud API template messages). Same outbox pattern as
+/// EmailMessage: queued in the business transaction, delivered afterwards with
+/// retries, SKIPPED when the provider isn't configured.
+model WhatsAppMessage {
+  id                String      @id @default(uuid()) @db.Uuid
+  template          String // our template key, e.g. "enquiry.new"
+  toNumber          String // E.164
+  payload           Json
+  status            EmailStatus @default(PENDING)
+  attempts          Int         @default(0)
+  nextAttemptAt     DateTime    @default(now()) @db.Timestamptz(3)
+  lastError         String?
+  providerMessageId String?
+  entityType        String?
+  entityId          String?     @db.Uuid
+  sentAt            DateTime?   @db.Timestamptz(3)
+  createdAt         DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime    @updatedAt @db.Timestamptz(3)
+
+  @@index([status, nextAttemptAt])
+  @@index([entityType, entityId])
 }
 
 /// Gap-free, per-year counters for human-readable references.

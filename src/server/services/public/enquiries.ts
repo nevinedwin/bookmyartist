@@ -8,6 +8,7 @@ import { toE164, type PublicEnquiry } from "@/lib/validation/enquiry";
 import { siteConfig } from "@/config/site";
 import { db } from "@/server/db";
 import { enqueueEmail } from "@/server/email/outbox";
+import { enqueueWhatsApp } from "@/server/whatsapp/outbox";
 import { notifyUsersWithPermission } from "@/server/services/notifications";
 import { nextReference } from "@/server/services/sequence";
 
@@ -42,7 +43,7 @@ export async function createPublicEnquiry(input: PublicEnquiry, ctx: SubmissionC
             select: { id: true, stageName: true, categoryId: true, category: { select: { name: true } } },
           })
         : null,
-      tx.businessSettings.findUnique({ where: { id: 1 }, select: { enquiryNotifyEmails: true } }),
+      tx.businessSettings.findUnique({ where: { id: 1 }, select: { enquiryNotifyEmails: true, enquiryNotifyWhatsapp: true } }),
     ]);
 
     // Link to an existing client only on an exact, unambiguous contact match.
@@ -135,6 +136,15 @@ export async function createPublicEnquiry(input: PublicEnquiry, ctx: SubmissionC
     });
     for (const to of settings?.enquiryNotifyEmails ?? []) {
       await enqueueEmail(tx, { template: "enquiry.new", to, payload, entityType: "Enquiry", entityId: enquiry.id });
+    }
+    for (const to of settings?.enquiryNotifyWhatsapp ?? []) {
+      await enqueueWhatsApp(tx, {
+        template: "enquiry.new",
+        to,
+        payload: { reference, name: input.name, eventType: eventTypeLabel, eventDate: eventDateLabel, eventCity: input.eventCity, adminUrl },
+        entityType: "Enquiry",
+        entityId: enquiry.id,
+      });
     }
 
     return { reference: enquiry.reference };

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SERVICES } from "@/content/services";
 import { SESSION_COOKIE } from "@/server/auth/cookie";
-import { activeArtistSlugs } from "@/server/services/public/artist-slugs";
+import { isActiveArtistSlug } from "@/server/services/public/artist-slugs";
 
 /**
  * Runs before rendering. With Cache Components, pages start streaming a 200
@@ -37,7 +37,7 @@ export async function proxy(request: NextRequest) {
 
   if (section === "artists") {
     try {
-      if (!(await activeArtistSlugs()).has(slug)) return notFound(request);
+      if (!(await isActiveArtistSlug(slug))) return notFound(request);
     } catch {
       // Database unavailable: let the page render (it shows not-found UI with noindex).
     }

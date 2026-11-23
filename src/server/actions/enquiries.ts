@@ -6,20 +6,24 @@ import {
   addNoteSchema,
   assignOwnerSchema,
   changeStatusSchema,
+  deleteEnquirySchema,
   logContactSchema,
   setFollowUpSchema,
   setPrioritySchema,
   togglePinSchema,
+  updateEnquirySchema,
 } from "@/lib/validation/admin-enquiry";
 import { requireActor } from "@/server/auth/dal";
 import {
   addEnquiryNote,
   assignEnquiryOwner,
   changeEnquiryStatus,
+  deleteEnquiry,
   logEnquiryContact,
   setEnquiryFollowUp,
   setEnquiryPriority,
   setNotePinned,
+  updateEnquiryDetails,
 } from "@/server/services/admin/enquiries";
 import { parseInput, runAction } from "./_run";
 
@@ -69,4 +73,15 @@ export async function setNotePinnedAction(input: unknown) {
 export async function logEnquiryContactAction(input: unknown) {
   const actor = await requireActor();
   return mutate("logEnquiryContact", () => logEnquiryContact(actor, parseInput(logContactSchema, input)));
+}
+
+export async function updateEnquiryDetailsAction(input: unknown) {
+  const actor = await requireActor();
+  return mutate("updateEnquiryDetails", () => updateEnquiryDetails(actor, parseInput(updateEnquirySchema, input)));
+}
+
+/** No refresh: the enquiry is gone, so the client navigates back to the list. */
+export async function deleteEnquiryAction(input: unknown) {
+  const actor = await requireActor();
+  return runAction("deleteEnquiry", () => deleteEnquiry(actor, parseInput(deleteEnquirySchema, input)));
 }

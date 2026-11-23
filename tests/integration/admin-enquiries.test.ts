@@ -78,7 +78,7 @@ describe("admin enquiry CRM", () => {
     const e = await newEnquiry();
     await expect(changeEnquiryStatus(finance, { enquiryId: e.id, from: "NEW", to: "CONTACTED" })).rejects.toBeInstanceOf(AuthorizationError);
     await expect(addEnquiryNote(finance, { enquiryId: e.id, body: "x" })).rejects.toBeInstanceOf(AuthorizationError);
-    expect((await getEnquiry(finance, e.id))?.permissions).toEqual({ write: false, reopen: false });
+    expect((await getEnquiry(finance, e.id))?.permissions).toEqual({ write: false, reopen: false, delete: false });
   });
 
   it("enforces the pipeline: valid transitions, lost reason, no manual CONFIRMED, stale-status conflicts", async () => {

@@ -7,6 +7,9 @@ const optional = z
   .transform((v) => (v === "" ? undefined : v))
   .optional();
 
+/** Blank means "use the default" (so `KEY=""` copied from .env.example is fine). */
+const withDefault = <T extends z.ZodType>(inner: T) => z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), inner);
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.url(),
@@ -16,6 +19,13 @@ const schema = z.object({
   RESEND_API_KEY: optional,
   EMAIL_FROM: optional,
   EMAIL_REPLY_TO: optional,
+
+  // WhatsApp Cloud API (Meta). Without these, WhatsApp alerts are queued and marked SKIPPED.
+  WHATSAPP_ACCESS_TOKEN: optional,
+  WHATSAPP_PHONE_NUMBER_ID: optional,
+  WHATSAPP_TEMPLATE_NEW_ENQUIRY: withDefault(z.string().trim().min(1).default("new_enquiry")),
+  WHATSAPP_TEMPLATE_LANGUAGE: withDefault(z.string().trim().min(2).default("en")),
+  WHATSAPP_API_VERSION: withDefault(z.string().regex(/^v\d+\.\d+$/).default("v23.0")),
 
   TURNSTILE_SECRET_KEY: optional,
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: optional,

@@ -1,12 +1,14 @@
 import "server-only";
 import type { Prisma } from "@/generated/prisma/client";
 import type { ActivityType, EnquiryStatus, LostReason, Priority } from "@/generated/prisma/enums";
-import { ENQUIRY_STATUS_LABELS, LOST_REASON_LABELS, PRIORITY_LABELS } from "@/lib/labels";
-import { businessDayEnd, businessLocalToUtc, formatDateTime } from "@/lib/time";
-import { ENQUIRY_PAGE_SIZE, type EnquiryListParams } from "@/lib/validation/admin-enquiry";
+import { formatBudget } from "@/lib/budget";
+import { ENQUIRY_STATUS_LABELS, EVENT_TYPE_LABELS, LOST_REASON_LABELS, PRIORITY_LABELS } from "@/lib/labels";
+import { businessDayEnd, businessLocalToUtc, calendarDateToUtc, formatCalendarDate, formatDateTime, utcToCalendarDate } from "@/lib/time";
+import { ENQUIRY_PAGE_SIZE, type EnquiryListParams, type UpdateEnquiryInput } from "@/lib/validation/admin-enquiry";
 import { type Actor, authorize, can } from "@/server/auth/actor";
 import { db, type Tx } from "@/server/db";
 import { CLOSED_ENQUIRY_STATUSES, ENQUIRY_PIPELINE, checkEnquiryTransition } from "@/server/domain/enquiry-status";
+import { audit, maskEmail } from "../audit";
 import { ServiceError, conflictError, notFoundError } from "../errors";
 
 /*
@@ -177,6 +179,7 @@ export async function getEnquiryBoard(actor: Actor, params: EnquiryListParams, n
 
 const detailSelect = {
   ...listSelect,
+  categoryId: true,
   contactEmail: true,
   contactPhone: true,
   venue: true,
@@ -228,7 +231,11 @@ export type EnquiryDetail = Omit<
   budgetMin: string | null;
   budgetMax: string | null;
   followUpDue: boolean;
-  permissions: { write: boolean; reopen: boolean };
+  /** Records that stop a permanent delete (only computed for `enquiry:delete` holders). */
+  deleteBlockers: string[];
+  /** What a delete would also remove, for the confirmation dialog. */
+  deleteImpact: { tasks: number; notes: number };
+  permissions: { write: boolean; reopen: boolean; delete: boolean };
 };
 
 export async function getEnquiry(actor: Actor, enquiryId: string, now = new Date()): Promise<EnquiryDetail | null> {
@@ -237,12 +244,18 @@ export async function getEnquiry(actor: Actor, enquiryId: string, now = new Date
   if (!row) return null;
   const { budgetMinPaise, budgetMaxPaise, ...rest } = row;
   const open = !CLOSED_ENQUIRY_STATUSES.includes(row.status);
+  const canDelete = can(actor, "enquiry:delete");
+  const [deleteBlockers, tasks] = canDelete
+    ? await Promise.all([findDeleteBlockers(db, row.id), db.task.count({ where: { enquiryId: row.id } })])
+    : [[], 0];
   return {
     ...rest,
     budgetMin: budgetMinPaise?.toString() ?? null,
     budgetMax: budgetMaxPaise?.toString() ?? null,
     followUpDue: open && !!row.nextFollowUpAt && row.nextFollowUpAt <= businessDayEnd(now),
-    permissions: { write: can(actor, "enquiry:write"), reopen: can(actor, "enquiry:reopen") },
+    deleteBlockers,
+    deleteImpact: { tasks, notes: row.notes.length },
+    permissions: { write: can(actor, "enquiry:write"), reopen: can(actor, "enquiry:reopen"), delete: canDelete },
   };
 }
 
@@ -453,4 +466,200 @@ export async function logEnquiryContact(
     }
     return { movedToContacted: moved };
   });
+}
+
+// ───────────────────────────── Edit & delete ─────────────────────────────
+
+const EDIT_LABELS = {
+  contactName: "name",
+  contactEmail: "email",
+  contactPhone: "phone",
+  organization: "organisation",
+  eventType: "event type",
+  eventDate: "event date",
+  eventCity: "city",
+  venue: "venue",
+  audienceSize: "audience",
+  categoryId: "category",
+  performanceType: "performance",
+  performersCount: "performers",
+  durationMinutes: "duration",
+  additionalRequirements: "requirements",
+  budget: "budget",
+} as const;
+
+/** Fields whose old → new values are worth showing on the timeline (not personal or long text). */
+const SHOW_VALUES = new Set(["eventType", "eventDate", "eventCity", "venue", "audienceSize", "category", "performersCount", "durationMinutes", "budget"]);
+
+/**
+ * Correct an enquiry's details (typos, a changed date, a clarified budget).
+ * Refused if someone saved in between. Every change is summarised on the
+ * timeline; contact details are named there but their values aren't copied.
+ */
+export async function updateEnquiryDetails(actor: Actor, input: UpdateEnquiryInput): Promise<{ changed: string[] }> {
+  authorize(actor, "enquiry:write");
+  return db.$transaction(async (tx) => {
+    const current = await tx.enquiry.findUnique({
+      where: { id: input.enquiryId },
+      select: {
+        id: true,
+        updatedAt: true,
+        contactName: true,
+        contactEmail: true,
+        contactPhone: true,
+        organization: true,
+        eventType: true,
+        eventDate: true,
+        eventCity: true,
+        venue: true,
+        audienceSize: true,
+        categoryId: true,
+        performanceType: true,
+        performersCount: true,
+        durationMinutes: true,
+        additionalRequirements: true,
+        budgetMinPaise: true,
+        budgetMaxPaise: true,
+        category: { select: { name: true } },
+      },
+    });
+    if (!current) throw notFoundError("Enquiry");
+    if (current.updatedAt.getTime() !== new Date(input.expectedUpdatedAt).getTime()) {
+      throw conflictError("Someone else changed this enquiry while you were editing. Reload to see the latest.");
+    }
+    let categoryName: string | null = null;
+    if (input.categoryId) {
+      const category = await tx.artistCategory.findUnique({ where: { id: input.categoryId }, select: { name: true } });
+      if (!category) throw new ServiceError("validation_error", "Choose a category.", { categoryId: ["Choose a category."] });
+      categoryName = category.name;
+    }
+
+    const next = {
+      contactName: input.contactName,
+      contactEmail: input.contactEmail,
+      contactPhone: input.contactPhone,
+      organization: input.organization,
+      eventType: input.eventType,
+      eventDate: calendarDateToUtc(input.eventDate),
+      eventCity: input.eventCity,
+      venue: input.venue,
+      audienceSize: input.audienceSize,
+      categoryId: input.categoryId,
+      performanceType: input.performanceType,
+      performersCount: input.performersCount,
+      durationMinutes: input.durationMinutes,
+      additionalRequirements: input.additionalRequirements,
+      budgetMinPaise: input.budgetMin === null ? null : BigInt(input.budgetMin),
+      budgetMaxPaise: input.budgetMax === null ? null : BigInt(input.budgetMax),
+    };
+
+    const show = (key: string, v: unknown): string => {
+      if (v === null || v === undefined || v === "") return "—";
+      if (key === "eventType") return EVENT_TYPE_LABELS[v as keyof typeof EVENT_TYPE_LABELS];
+      if (key === "durationMinutes") return `${String(v)} min`;
+      return String(v);
+    };
+    const parts: string[] = [];
+    const changed: string[] = [];
+    for (const key of Object.keys(EDIT_LABELS) as (keyof typeof EDIT_LABELS)[]) {
+      let before: unknown;
+      let after: unknown;
+      if (key === "budget") {
+        before = formatBudget(current.budgetMinPaise?.toString() ?? null, current.budgetMaxPaise?.toString() ?? null);
+        after = formatBudget(input.budgetMin, input.budgetMax);
+      } else if (key === "categoryId") {
+        before = current.category?.name ?? null;
+        after = categoryName;
+      } else if (key === "eventDate") {
+        before = utcToCalendarDate(current.eventDate);
+        after = input.eventDate;
+      } else {
+        before = current[key];
+        after = next[key];
+      }
+      if ((before ?? null) === (after ?? null)) continue;
+      changed.push(key);
+      const label = EDIT_LABELS[key];
+      const valueKey = key === "categoryId" ? "category" : key;
+      if (SHOW_VALUES.has(valueKey)) {
+        const fmt = (v: unknown) => (key === "eventDate" ? formatCalendarDate(v as string) : show(key, v));
+        parts.push(`${label} ${fmt(before)} → ${fmt(after)}`);
+      } else {
+        parts.push(label);
+      }
+    }
+    if (!changed.length) return { changed };
+
+    await tx.enquiry.update({ where: { id: current.id }, data: { ...next, updatedById: actor.userId } });
+    await activity(tx, current.id, actor, "UPDATED", `Details edited: ${parts.join("; ")}`, { metadata: { changed } });
+    return { changed };
+  });
+}
+
+/** History that must outlive the enquiry: money and contracts. */
+async function findDeleteBlockers(tx: Tx | typeof db, enquiryId: string): Promise<string[]> {
+  const row = await tx.enquiry.findUnique({
+    where: { id: enquiryId },
+    select: { booking: { select: { id: true } }, _count: { select: { quotations: true, files: true } } },
+  });
+  if (!row) return [];
+  const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+  return [
+    row.booking ? "a booking" : null,
+    row._count.quotations ? n(row._count.quotations, "quotation") : null,
+    row._count.files ? n(row._count.files, "file") : null,
+  ].filter((b): b is string => b !== null);
+}
+
+/**
+ * Permanently delete an enquiry (spam, tests, duplicates). Its notes,
+ * timeline, artist links, tentative holds, tasks and notifications go with it.
+ * Refused once quotations, a booking or files exist. Audited with the
+ * reference and a masked email only.
+ */
+export async function deleteEnquiry(actor: Actor, input: { enquiryId: string; confirmReference: string }): Promise<{ reference: string }> {
+  authorize(actor, "enquiry:delete");
+  return db.$transaction(async (tx) => {
+    const enquiry = await tx.enquiry.findUnique({
+      where: { id: input.enquiryId },
+      select: { id: true, reference: true, status: true, source: true, contactEmail: true, createdAt: true },
+    });
+    if (!enquiry) throw notFoundError("Enquiry");
+    if (input.confirmReference !== enquiry.reference.toUpperCase()) {
+      throw new ServiceError("validation_error", "Type the reference exactly to confirm.", { confirmReference: ["Doesn't match the reference."] });
+    }
+    const blockers = await findDeleteBlockers(tx, enquiry.id);
+    if (blockers.length) {
+      throw new ServiceError("has_history", `This enquiry has ${blockers.join(", ")}, so it can't be deleted. Mark it lost or cancelled instead.`);
+    }
+    const tasks = await tx.task.deleteMany({ where: { enquiryId: enquiry.id } });
+    await tx.artistAvailability.deleteMany({ where: { enquiryId: enquiry.id } });
+    await tx.notification.deleteMany({ where: { href: `/admin/enquiries/${enquiry.id}` } });
+    // Notes, activities and artist links cascade.
+    await tx.enquiry.delete({ where: { id: enquiry.id } });
+    await audit(
+      {
+        actorId: actor.userId,
+        action: "enquiry.deleted",
+        entityType: "Enquiry",
+        entityId: enquiry.id,
+        before: {
+          reference: enquiry.reference,
+          status: enquiry.status,
+          source: enquiry.source,
+          contactEmail: maskEmail(enquiry.contactEmail),
+          createdAt: enquiry.createdAt.toISOString(),
+          tasksDeleted: tasks.count,
+        },
+      },
+      tx,
+    );
+    return { reference: enquiry.reference };
+  });
+}
+
+/** Category choices for the edit form (hidden categories stay selectable if already used). */
+export async function listEnquiryCategories(actor: Actor): Promise<{ id: string; name: string; isActive: boolean }[]> {
+  authorize(actor, "enquiry:read");
+  return db.artistCategory.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true, isActive: true } });
 }
